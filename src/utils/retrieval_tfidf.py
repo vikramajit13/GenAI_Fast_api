@@ -36,4 +36,16 @@ def keyword_score_idf(query: str, chunk: str, idf: dict[str, float]) -> float:
     num = sum(idf.get(t, 0.0) for t in overlap)
     den = sum(idf.get(t, 0.0) for t in q) + 1e-6
     return num / den
+
+
+def keyword_score_idf_tokens(query: str, chunk_tokens: set[str], idf: dict) -> float:
+    q = set(tokenize(query))
+   
+    overlap = q & chunk_tokens
+    if not q:
+        return 0.0
+    # sum weights of overlapping terms
+    num = sum(idf.get(t, 0.0) for t in overlap)
+    den = sum(idf.get(t, 0.0) for t in q) + 1e-6
+    return num / den
     

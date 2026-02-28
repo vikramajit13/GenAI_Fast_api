@@ -63,3 +63,13 @@ def tokenize(text: str) -> list[str]:
     # keep numbers and % as tokens, drop most punctuation
     tokens = re.findall(r"[a-zA-Z]+|\d+%?|\d+", text.lower())
     return [t for t in tokens if t not in STOPWORDS and len(t) > 1]
+
+INSTRUCTION_PHRASES = [
+  "from the context", "answer", "direct quote", "use only", "provided context"
+]
+
+def clean_query(q: str) -> str:
+    qq = q.lower()
+    for p in INSTRUCTION_PHRASES:
+        qq = qq.replace(p, " ")
+    return qq

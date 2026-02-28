@@ -6,7 +6,7 @@ import ollama
 
 
 def query_with_context(
-    user_query: str ,
+    user_query: str,
     chunks: List[str],
     selected_indices: List[int],
     trace: bool = True,
@@ -18,7 +18,6 @@ def query_with_context(
 
     # if required items is there
     # check for items
-
 
     if trace:
         print("\n=== RAG TRACE ===")
@@ -35,7 +34,7 @@ def query_with_context(
         "- Use ONLY the provided context.\n"
         "- If the answer is not explicitly in the context, say exactly: "
         '"I don\'t know based on the provided context."\n'
-        "- For each bullet, include a short supporting quote from the context.\n"
+        "- answer thsi question only, include a short supporting quote from the context.\n"
         "- Keep the answer concise.\n"
     )
 
@@ -60,7 +59,7 @@ Answer format (exactly 3 bullets):
             {"role": "user", "content": user_prompt},
         ],
         # If supported by your Ollama version:
-        # options={"temperature": 0}
+        options={"temperature": 0, "num_predict": 150},
     )
 
     # handle both return types
