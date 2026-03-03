@@ -5,6 +5,8 @@ from ..utils.embeddings import return_embeddings
 from ..utils.retrieval_tfidf import build_idf, keyword_score_idf_tokens
 from ..utils.invoke_ollama import query_with_context
 
+import faiss
+
 
 class RagService:
     def __init__(self, stores: dict[str, RAGStore]):
@@ -35,6 +37,10 @@ class RagService:
 
         # 3) embed chunks (single call)
         emb = return_embeddings(chunks)  # returns np.ndarray (n, dim) normalized
+        emb = np.ascontiguousarray(emb, dtype=np.float32)
+        
+        index = faiss.IndexFlatIP(emb.shape[1])
+        index.add(emb)
 
         # 4) build idf + tokens once
         idf = build_idf(chunks)
@@ -45,6 +51,8 @@ class RagService:
         store.index.embeddings = emb
         store.index.idf = idf
         store.index.tokens = tokens
+        store.index.faiss = index
+        store.index.dim = emb.shape[1]
 
         return {"store": store_name, "num_chunks": len(chunks)}
 
@@ -60,7 +68,9 @@ class RagService:
 
         # embed query
         q_clean = clean_query(query)
-        q_emb = return_embeddings([q_clean])[0]  # shape (dim,)
+        #q_emb = return_embeddings([q_clean])[0]  # shape (dim,)
+        q_emb = np.asarray(return_embeddings([query])[0]).astype("float32").reshape(1, -1)
+        faiss.normalize_L2(q_emb)
 
         results = []
        
