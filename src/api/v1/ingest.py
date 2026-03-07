@@ -9,7 +9,7 @@ router = APIRouter()
 
 @router.post("/ingest/")
 async def ingest_doc(name: str, doc: Ingest, service=Depends(get_rag_service)):
-    out = service.ingest_and_index(name, doc.doc)
+    out = await service.index_and_store_pg_vector(name, doc.doc)
     return out
 
 

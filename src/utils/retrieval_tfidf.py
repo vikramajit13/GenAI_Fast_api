@@ -48,4 +48,11 @@ def keyword_score_idf_tokens(query: str, chunk_tokens: set[str], idf: dict) -> f
     num = sum(idf.get(t, 0.0) for t in overlap)
     den = sum(idf.get(t, 0.0) for t in q) + 1e-6
     return num / den
-    
+
+
+def keyword_score_simple(query: str, chunk: str) -> float:
+    q = set(tokenize(query))
+    c = set(tokenize(chunk))
+    if not q:
+        return 0.0
+    return len(q & c) / (len(q) + 1e-6)

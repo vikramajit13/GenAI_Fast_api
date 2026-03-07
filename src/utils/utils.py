@@ -59,6 +59,13 @@ STOPWORDS = {
     "they","their","them","we","you","your","i","our","us"
 }
 
+STOP_PHRASES = [
+    "from the context",
+    "answer the following",
+    "with a direct quote",
+    "for each",
+]
+
 def tokenize(text: str) -> list[str]:
     # keep numbers and % as tokens, drop most punctuation
     tokens = re.findall(r"[a-zA-Z]+|\d+%?|\d+", text.lower())
@@ -73,3 +80,34 @@ def clean_query(q: str) -> str:
     for p in INSTRUCTION_PHRASES:
         qq = qq.replace(p, " ")
     return qq
+
+def to_pgvector_str(x) -> str:
+    # x is a 1D numpy array or list of floats length 384
+    return "[" + ",".join(f"{float(v):.8f}" for v in x) + "]"
+
+def to_vec_literal(v: np.ndarray) -> str:
+    # pgvector literal format: [0.1,0.2,...]
+    v = np.asarray(v, dtype=np.float32)
+    return "[" + ",".join(f"{x:.6f}" for x in v.tolist()) + "]"
+
+def extract_anchor_sentences(chunk_text: str, anchors: list[str]) -> list[str]:
+    sentences = split_sentences(chunk_text)
+    return [
+        s.strip()
+        for s in sentences
+        if any(a in s.lower() for a in anchors)
+    ]
+
+def make_lexical_query(q: str) -> str:
+    q2 = q.lower()
+    for p in STOP_PHRASES:
+        q2 = q2.replace(p, " ")
+    q2 = q2.replace("/", " ")
+    q2 = re.sub(r"[^a-z0-9\s\"]", " ", q2)
+    tokens = [t for t in q2.split() if t not in STOPWORDS and len(t) > 2]
+    tokens = [f"{t}:*" for t in q2.split() if len(t) > 2]
+    return " ".join(tokens)
+    #return " or ".join(tokens)  # cap length; avoid over-constraining
+    
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))

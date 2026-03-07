@@ -6,5 +6,5 @@ router = APIRouter()
 
 @router.post("/answer/")
 async def answer(name: str, req: AnswerRequest, service = Depends(get_rag_service)):
-    out = service.answer(name, req.query, k=req.k, use_hybrid=req.use_hybrid, required_terms=req.required_terms)
+    out = await service.answer(name, req.query, k=req.k, use_hybrid=req.use_hybrid)
     return {"store": name, **out}

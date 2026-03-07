@@ -7,38 +7,39 @@ import ollama
 
 def query_with_context(
     user_query: str,
-    chunks: List[str],
-    selected_indices: List[int],
+    chunks: list[dict],
     trace: bool = True,
 ) -> str:
-    # 1) Context formatting: add chunk ids + clear separators (better than <...>)
     context_text = "\n\n---\n\n".join(
-        [f"[CHUNK {i}]\n{chunks[i].strip()}" for i in selected_indices]
+        [
+            f"[CHUNK {c['idx']}]\n{c['chunk_text'].strip()}"
+            for c in chunks
+        ]
     )
-
-    # if required items is there
-    # check for items
 
     if trace:
         print("\n=== RAG TRACE ===")
         print("Query:", user_query)
-        print("Selected indices:", selected_indices)
-        print("\n=== CONTEXT (first 800 chars) ===")
-        print(context_text[:800])
+        print("\n=== CONTEXT (first 1200 chars) ===")
+        print(context_text[:1200])
         print("Context chars:", len(context_text))
+        print("Num chunks:", len(chunks))
 
-    # 2) Strong system message for rules
-    system_prompt = (
-        "You are a careful assistant.\n"
-        "Rules:\n"
-        "- Use ONLY the provided context.\n"
-        "- If the answer is not explicitly in the context, say exactly: "
-        '"I don\'t know based on the provided context."\n'
-        "- answer thsi question only, include a short supporting quote from the context.\n"
-        "- Keep the answer concise.\n"
-    )
+    system_prompt = """
+You are a retrieval-grounded assistant.
 
-    # 3) User prompt: structured output reduces drift
+Rules:
+1. Use only the provided context.
+2. Do not use outside knowledge.
+3. If the answer is not explicitly supported, say exactly:
+   "I don't know based on the provided context."
+4. Every answer must include a direct quote and chunk citation.
+5. The Answer field must be a short complete sentence, not just a keyword or phrase fragment.
+6. Do not output generic placeholders like "foreign policy challenge".
+7. Do not repeat headings or output multiple answer blocks for the same field.
+8. Use the most direct supporting quote available in the provided chunks.
+""".strip()
+
     user_prompt = f"""
 Context:
 {context_text}
@@ -46,10 +47,20 @@ Context:
 Question:
 {user_query}
 
-Answer format (exactly 3 bullets):
-- Democracy: <answer> (quote: "...")
-- Corporate taxation: <answer> (quote: "...")
-- Reproductive rights: <answer> (quote: "...")
+Return exactly in this format:
+
+Democracy:
+- Answer: <short answer>
+- Quote: "<direct quote>"
+- Source: [CHUNK X]
+
+Foreign policy challenge:
+- Answer: <one concrete issue only>
+- Quote: "<direct quote>"
+- Source: [CHUNK Y]
+
+If either item is not supported by the context, write exactly:
+I don't know based on the provided context.
 """.strip()
 
     response = ollama.chat(
@@ -58,12 +69,36 @@ Answer format (exactly 3 bullets):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        # If supported by your Ollama version:
-        options={"temperature": 0, "num_predict": 150},
+        options={"temperature": 0},
     )
 
-    # handle both return types
     try:
         return response["message"]["content"]
     except Exception:
         return response.message.content
+    
+def get_lexical_query(user_query):
+
+    prompt = f"""
+You convert a user query into a short keyword search query.
+
+Rules:
+- Return 3 to 6 keywords only
+- Use words that appear in the query
+- Do not invent new terms
+- No punctuation
+- No explanations
+
+User query:
+{user_query}
+
+Keywords:
+"""
+
+    response = ollama.generate(
+        model="llama3.1:8b",
+        prompt=prompt,
+        options={"temperature":0, "num_predict":20}
+    )
+
+    return response["response"].strip()

@@ -1,11 +1,27 @@
 from ..core.store import RAGStore
 import numpy as np
-from ..utils.utils import chunk_text, cosine_similarity, tokenize, clean_query
-from ..utils.embeddings import return_embeddings
-from ..utils.retrieval_tfidf import build_idf, keyword_score_idf_tokens
-from ..utils.invoke_ollama import query_with_context
-
+from ..utils.utils import (
+    chunk_text,
+    cosine_similarity,
+    tokenize,
+    clean_query,
+    to_pgvector_str,
+    to_vec_literal,
+    extract_anchor_sentences,
+    make_lexical_query,
+)
+from ..utils.embeddings import return_embeddings, return_crossencoded
+from ..utils.retrieval_tfidf import (
+    build_idf,
+    keyword_score_idf_tokens,
+    keyword_score_simple,
+)
+from ..utils.invoke_ollama import query_with_context, get_lexical_query
+from ..core.db import get_pool
+from asyncpg.exceptions import PostgresError
 import faiss
+import asyncio
+from typing import Any
 
 
 class RagService:
@@ -38,7 +54,7 @@ class RagService:
         # 3) embed chunks (single call)
         emb = return_embeddings(chunks)  # returns np.ndarray (n, dim) normalized
         emb = np.ascontiguousarray(emb, dtype=np.float32)
-        
+
         index = faiss.IndexFlatIP(emb.shape[1])
         index.add(emb)
 
@@ -56,86 +72,140 @@ class RagService:
 
         return {"store": store_name, "num_chunks": len(chunks)}
 
-    def retrieve(
-        self, store_name: str, query: str, k: int = 5, use_hybrid: bool = True
-    ) -> list[dict]:
-        store = self._get_store(store_name)
-        
-        idx = store.index
-
-        if not idx.chunks or idx.embeddings is None:
-            return []
-
-        # embed query
-        q_clean = clean_query(query)
-        #q_emb = return_embeddings([q_clean])[0]  # shape (dim,)
-        q_emb = np.asarray(return_embeddings([query])[0]).astype("float32").reshape(1, -1)
-        faiss.normalize_L2(q_emb)
-
-        results = []
-       
-        for i, ch in enumerate(idx.chunks):
-            cos = float(cosine_similarity(q_emb, idx.embeddings[i]))
-
-            kw = (
-                float(keyword_score_idf_tokens(q_clean, idx.tokens[i], idx.idf))
-                if use_hybrid
-                else 0.0
-            )
-            bonus = 0.0  # keep 0 for now; add anchor bonus later
-
-            final = (0.75 * cos + 0.20 * kw + bonus) if use_hybrid else cos
-
-            results.append(
-                {
-                    "idx": i,
-                    "cosine": cos,
-                    "keyword": kw,
-                    "bonus": bonus,
-                    "final": final,
-                    "preview": ch.replace("\n", " ")[:160],
-                }
-            )
-
-        results.sort(key=lambda x: x["final"], reverse=True)
-        return results[:k]
-
-    def answer(
+    async def answer(
         self,
         store_name: str,
         query: str,
         k: int = 3,
         use_hybrid: bool = True,
-        required_terms: list[str] | None = None,
     ) -> dict:
-        ranked = self.retrieve(store_name, query, k=k, use_hybrid=use_hybrid)
-        ranked = [r for r in ranked if r["final"] >= 0.30]
-        ranked_for_llm = ranked[:2]  # or 3
-        indices = [r["idx"] for r in ranked_for_llm]
+        ranked = await self.retreive_from_db(
+            store_name, query, k=k, use_hybrid=use_hybrid
+        )
+        # ranked = [r for r in ranked if r["rrf"] >= 0.01]
+        # ranked_for_llm = ranked[:3]
+        reranked = return_crossencoded(ranked, query)
 
-        store = self._get_store(store_name)
-        selected_chunks = [store.index.chunks[i] for i in indices]
-
-        # evidence gate (simple)
-        evidence_ok = True
-        if required_terms:
-            evidence_ok = all(
-                any(t.lower() in c.lower() for c in selected_chunks)
-                for t in required_terms
-            )
-
-        if not evidence_ok:
-            return {
-                "answer": "I don't know based on the provided context.",
-                "used_indices": indices,
-                "evidence_ok": False,
-                "retrieval": ranked,
-            }
-
-        ans = query_with_context(query, store.index.chunks, indices, trace=False)
+        ans = query_with_context(query, reranked, trace=False)
         return {
+            "store": store_name,
             "answer": ans,
-            "used_indices": indices,
-            "evidence_ok": True,
-            "retrieval": ranked,
+            "retrieval": reranked,
         }
+
+    async def index_and_store_pg_vector(self, name: str, text: str) -> dict:
+
+        # not adding anything in store here but keeping the same signature, Store will be populated by retrieve.
+        chunks = chunk_text(text, target_chars=800, overlap_sents=1, min_chars=200)
+        emb = np.asarray(return_embeddings(chunks), dtype=np.float32)
+
+        rows = [
+            (name, i, chunks[i], to_pgvector_str(emb[i])) for i in range(len(chunks))
+        ]
+
+        sql = """
+            INSERT INTO rag_chunks(doc_id, chunk_index, chunk_text, embedding, tsv)
+            VALUES($1, $2, $3, $4::vector, to_tsvector('english', $3))
+            ON CONFLICT (doc_id, chunk_index)
+            DO UPDATE SET chunk_text = EXCLUDED.chunk_text, embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv
+            """
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.executemany(sql, rows)
+        except PostgresError as e:
+            print("db error occured", e)
+        except Exception as e:
+            print("some error occured", e)
+
+        return {"store": name, "num_chunks": len(chunks)}
+
+    async def retreive_from_db(
+        self, name: str, query: str, k: int = 5, use_hybrid: bool = True
+    ) -> list[dict]:
+
+        q_clean = clean_query(query)
+        q_emb_lex = get_lexical_query(q_clean) or q_clean
+        q_emb = return_embeddings([q_clean])[0]
+        q_emb_param = to_vec_literal(q_emb)
+
+        rows = await self.get_search_results(q_emb_param, q_emb_lex, name, k)
+
+        if not rows:
+            return []
+
+        results = []
+        return [
+            {
+                "idx": int(r["chunk_index"]),
+                "rrf": float(r["rrf_score"]),
+                "chunk_text": r["chunk_text"],
+            }
+            for r in rows
+        ]
+
+    async def get_search_results(
+        self, q_emb: str, lex_query: str, name: str, k: int
+    ) -> list[Any]:
+        sql = """
+       WITH
+        vec AS (
+        SELECT
+            chunk_index,
+            chunk_text,
+            row_number() OVER (ORDER BY embedding <=> $1::vector) AS r_vec
+        FROM rag_chunks
+        WHERE doc_id = $2
+        ORDER BY embedding <=> $1::vector
+        LIMIT $3
+        ),
+        lex AS (
+        SELECT
+            chunk_index,
+            chunk_text,
+            row_number() OVER (ORDER BY ts_rank_cd(tsv, q.query) DESC) AS r_lex
+        FROM rag_chunks
+        CROSS JOIN (SELECT websearch_to_tsquery('english', $4) AS query) q
+        WHERE doc_id = $2
+            AND tsv @@ q.query
+        ORDER BY ts_rank_cd(tsv, q.query) DESC
+        LIMIT $3
+        ),
+        fused AS (
+        SELECT
+            COALESCE(vec.chunk_index, lex.chunk_index) AS chunk_index,
+            COALESCE(vec.chunk_text, lex.chunk_text) AS chunk_text,
+            vec.r_vec,
+            lex.r_lex,
+            (CASE WHEN vec.r_vec IS NOT NULL THEN 1.0 / ($5 + vec.r_vec) ELSE 0 END) +
+            (CASE WHEN lex.r_lex IS NOT NULL THEN 1.0 / ($5 + lex.r_lex) ELSE 0 END)
+            AS rrf_score
+        FROM vec
+        FULL OUTER JOIN lex USING (chunk_index)
+        )
+        SELECT chunk_index, chunk_text, r_vec, r_lex, rrf_score
+        FROM fused
+        ORDER BY rrf_score DESC
+        LIMIT $6;
+        """
+
+        # sql_with_cte = """
+        # WITH q AS (SELECT websearch_to_tsquery('english', $1) AS query)
+        # SELECT chunk_index, chunk_text,
+        #     ts_rank_cd(tsv, q.query) AS lex_score
+        # FROM rag_chunks, q
+        # WHERE doc_id = $2 AND tsv @@ q.query
+        # ORDER BY lex_score DESC
+        # LIMIT $3;
+        # """
+        print("lex_query", lex_query)
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, q_emb, name, k, lex_query, 60, 6)
+
+            return rows
+        except PostgresError as e:
+            print("some error occured", e)
+            raise

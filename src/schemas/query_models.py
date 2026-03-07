@@ -10,4 +10,3 @@ class AnswerRequest(BaseModel):
     query: str
     k: int = 6
     use_hybrid: bool = True
-    required_terms: Optional[List[str]] = None
