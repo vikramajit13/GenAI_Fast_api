@@ -12,7 +12,7 @@ def query_with_context(
 ) -> str:
     context_text = "\n\n---\n\n".join(
         [
-            f"[CHUNK {c['idx']}]\n{c['chunk_text'].strip()}"
+            f"[CHUNK {c['chunk_index']}]\n[SENTENCE {c['sentence_index']}]\n{c['text'].strip()}"
             for c in chunks
         ]
     )
@@ -52,12 +52,12 @@ Return exactly in this format:
 Democracy:
 - Answer: <short answer>
 - Quote: "<direct quote>"
-- Source: [CHUNK X]
+- Source: [CHUNK X],[SENTENCE Z]
 
 Foreign policy challenge:
 - Answer: <one concrete issue only>
 - Quote: "<direct quote>"
-- Source: [CHUNK Y]
+- Source: [CHUNK Y],[SENTENCE Z]
 
 If either item is not supported by the context, write exactly:
 I don't know based on the provided context.

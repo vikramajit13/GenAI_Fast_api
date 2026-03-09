@@ -2,19 +2,19 @@ from ..core.store import RAGStore
 import numpy as np
 from ..utils.utils import (
     chunk_text,
-    cosine_similarity,
     tokenize,
     clean_query,
     to_pgvector_str,
     to_vec_literal,
-    extract_anchor_sentences,
-    make_lexical_query,
 )
-from ..utils.embeddings import return_embeddings, return_crossencoded
+from ..utils.embeddings import (
+    return_embeddings,
+    return_crossencoded,
+    return_topk_sentences,
+    return_top_sentences
+)
 from ..utils.retrieval_tfidf import (
     build_idf,
-    keyword_score_idf_tokens,
-    keyword_score_simple,
 )
 from ..utils.invoke_ollama import query_with_context, get_lexical_query
 from ..core.db import get_pool
@@ -85,12 +85,14 @@ class RagService:
         # ranked = [r for r in ranked if r["rrf"] >= 0.01]
         # ranked_for_llm = ranked[:3]
         reranked = return_crossencoded(ranked, query)
+        sentences = return_top_sentences(reranked, query)
+        print("sentences :::", sentences)
 
-        ans = query_with_context(query, reranked, trace=False)
+        ans = query_with_context(query, sentences, trace=False)
         return {
             "store": store_name,
             "answer": ans,
-            "retrieval": reranked,
+            "retrieval": sentences,
         }
 
     async def index_and_store_pg_vector(self, name: str, text: str) -> dict:
