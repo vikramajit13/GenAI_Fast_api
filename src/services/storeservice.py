@@ -19,7 +19,7 @@ from ..utils.retrieval_tfidf import (
 from ..utils.invoke_ollama import query_with_context, get_lexical_query
 from ..core.db import get_pool
 from asyncpg.exceptions import PostgresError
-import faiss
+#import faiss
 import asyncio
 from typing import Any
 
@@ -42,35 +42,35 @@ class RagService:
             self.stores[name] = RAGStore(name)
         return self.stores[name]
 
-    def ingest_and_index(self, store_name: str, text: str) -> dict:
-        store = self._get_store(store_name)
+    # def ingest_and_index(self, store_name: str, text: str) -> dict:
+    #     store = self._get_store(store_name)
 
-        # 1) store raw doc
-        store.add_document(text)
+    #     # 1) store raw doc
+    #     store.add_document(text)
 
-        # 2) chunk
-        chunks = chunk_text(text, target_chars=800, overlap_sents=1, min_chars=200)
+    #     # 2) chunk
+    #     chunks = chunk_text(text, target_chars=800, overlap_sents=1, min_chars=200)
 
-        # 3) embed chunks (single call)
-        emb = return_embeddings(chunks)  # returns np.ndarray (n, dim) normalized
-        emb = np.ascontiguousarray(emb, dtype=np.float32)
+    #     # 3) embed chunks (single call)
+    #     emb = return_embeddings(chunks)  # returns np.ndarray (n, dim) normalized
+    #     emb = np.ascontiguousarray(emb, dtype=np.float32)
 
-        index = faiss.IndexFlatIP(emb.shape[1])
-        index.add(emb)
+    #     index = faiss.IndexFlatIP(emb.shape[1])
+    #     index.add(emb)
 
-        # 4) build idf + tokens once
-        idf = build_idf(chunks)
-        tokens = [set(tokenize(c)) for c in chunks]
+    #     # 4) build idf + tokens once
+    #     idf = build_idf(chunks)
+    #     tokens = [set(tokenize(c)) for c in chunks]
 
-        # 5) save index
-        store.index.chunks = chunks
-        store.index.embeddings = emb
-        store.index.idf = idf
-        store.index.tokens = tokens
-        store.index.faiss = index
-        store.index.dim = emb.shape[1]
+    #     # 5) save index
+    #     store.index.chunks = chunks
+    #     store.index.embeddings = emb
+    #     store.index.idf = idf
+    #     store.index.tokens = tokens
+    #     store.index.faiss = index
+    #     store.index.dim = emb.shape[1]
 
-        return {"store": store_name, "num_chunks": len(chunks)}
+    #     return {"store": store_name, "num_chunks": len(chunks)}
 
     async def answer(
         self,

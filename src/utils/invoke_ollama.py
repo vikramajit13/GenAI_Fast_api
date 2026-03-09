@@ -1,5 +1,8 @@
 from typing import List, Dict, Any
-import ollama
+from ollama import Client
+from ..core.config import settings
+
+client  = Client(host=settings.OLLAMA_HOST)
 
 # This is fine for now
 # Make this into a generci llm prompter so that this is not tightly coupled with ollama in future
@@ -63,7 +66,7 @@ If either item is not supported by the context, write exactly:
 I don't know based on the provided context.
 """.strip()
 
-    response = ollama.chat(
+    response = client.chat(
         model="llama3.1:8b",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -95,7 +98,7 @@ User query:
 Keywords:
 """
 
-    response = ollama.generate(
+    response = client.generate(
         model="llama3.1:8b",
         prompt=prompt,
         options={"temperature":0, "num_predict":20}

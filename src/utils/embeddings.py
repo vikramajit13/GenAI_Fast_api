@@ -1,14 +1,16 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from .utils import split_sentences, cosine_similarity, normalize_text
+from ..core.config import settings
 
-
-_model = SentenceTransformer("all-MiniLM-L6-v2")
-_model_crossencoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+embedding_model = settings.EMBEDDING_MODEL or "all-MiniLM-L6-v2"
+encoder_model = settings.ENCODER_MODEL or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_model = SentenceTransformer(embedding_model)
+_model_crossencoder = CrossEncoder(encoder_model)
 
 
 def return_embeddings(
-    sentences: list[str], model_name: str = "all-MiniLM-L6-v2"
+    sentences: list[str]
 ) -> np.ndarray:
     """
     Chunks text and returns a NumPy array of embeddings.
