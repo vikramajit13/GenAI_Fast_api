@@ -112,3 +112,4 @@ def return_top_sentences(reranked: list[dict], query: str, top_n: int = 5) -> li
             break
 
     return unique
+

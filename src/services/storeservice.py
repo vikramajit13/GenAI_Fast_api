@@ -11,7 +11,7 @@ from ..utils.embeddings import (
     return_embeddings,
     return_crossencoded,
     return_topk_sentences,
-    return_top_sentences
+    return_top_sentences,
 )
 from ..utils.retrieval_tfidf import (
     build_idf,
@@ -19,28 +19,14 @@ from ..utils.retrieval_tfidf import (
 from ..utils.invoke_ollama import query_with_context, get_lexical_query
 from ..core.db import get_pool
 from asyncpg.exceptions import PostgresError
-#import faiss
+
+# import faiss
 import asyncio
 from typing import Any
 
 
 class RagService:
-    def __init__(self, stores: dict[str, RAGStore]):
-        self.stores = stores
-
-    def add_to_store(self, store_name: str, content: str):
-        store = self._get_store(store_name)
-        return store.add_document(content)
-
-    def search_in_store(self, store_name: str, query_text: str):
-        store = self._get_store(store_name)
-        return store.query(query_text)
-
-    def _get_store(self, name: str) -> RAGStore:
-        if name not in self.stores:
-            # You can decide to auto-create or raise an error
-            self.stores[name] = RAGStore(name)
-        return self.stores[name]
+    
 
     # def ingest_and_index(self, store_name: str, text: str) -> dict:
     #     store = self._get_store(store_name)
@@ -82,18 +68,34 @@ class RagService:
         ranked = await self.retreive_from_db(
             store_name, query, k=k, use_hybrid=use_hybrid
         )
+        if not ranked:
+            return {"answer": None, "reason": "no_retrieval_results", "retrieval": []}
         # ranked = [r for r in ranked if r["rrf"] >= 0.01]
         # ranked_for_llm = ranked[:3]
         reranked = return_crossencoded(ranked, query)
         sentences = return_top_sentences(reranked, query)
-        print("sentences :::", sentences)
-
-        ans = query_with_context(query, sentences, trace=False)
-        return {
-            "store": store_name,
-            "answer": ans,
-            "retrieval": sentences,
-        }
+        sentences = [r for r in sentences if r["score"] >= 0.25]
+        if not sentences:
+            return {
+                "answer": None,
+                "reason": "insufficient_evidence",
+                "retrieval": ranked,
+            }
+            
+        try:
+            ans = query_with_context(query, sentences, trace=False)
+            return {
+                "store": store_name,
+                "answer": ans,
+                "retrieval": sentences,
+            }
+        except Exception as e:
+            return {
+                "answer": None,
+                "reason": "llm_unavailable",
+                "error": str(e),
+                "retrieval": ranked,
+            }
 
     async def index_and_store_pg_vector(self, name: str, text: str) -> dict:
 
@@ -211,3 +213,6 @@ class RagService:
         except PostgresError as e:
             print("some error occured", e)
             raise
+        
+    async def orchestrate_answer(doc_id:str, query:str)->dict:
+        return {}
