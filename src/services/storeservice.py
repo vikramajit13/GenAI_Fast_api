@@ -12,6 +12,7 @@ from ..utils.embeddings import (
     return_crossencoded,
     return_topk_sentences,
     return_top_sentences,
+    select_evidence
 )
 from ..utils.retrieval_tfidf import (
     build_idf,
@@ -83,7 +84,7 @@ class RagService:
             }
             
         try:
-            ans = query_with_context(query, sentences, trace=False)
+            ans = await query_with_context(query, sentences, trace=False)
             return {
                 "store": store_name,
                 "answer": ans,
@@ -214,5 +215,46 @@ class RagService:
             print("some error occured", e)
             raise
         
-    async def orchestrate_answer(doc_id:str, query:str)->dict:
-        return {}
+    async def orchestrate_answer(self,doc_id: str, query: str, max_retries: int = 1):
+
+        attempt = 0
+        current_query = query
+
+        while attempt <= max_retries:
+
+            ranked = await self.retreive_from_db(doc_id, current_query)
+
+            if not ranked:
+                return {
+                    "path": "refuse",
+                    "reason": "no_retrieval_results",
+                    "answer": None,
+                    "sources": []
+                }
+
+            sentences = select_evidence(ranked)
+
+            if sentences:
+                answer = await query_with_context(query, sentences)
+
+                return {
+                    "path": "direct_answer" if attempt == 0 else "retry_retrieval",
+                    "answer": answer,
+                    "sources": sentences,
+                    "attempts": attempt + 1
+                }
+
+            if attempt == max_retries:
+                break
+
+            # rewrite query for retry
+            current_query = rewrite_query(query)
+            attempt += 1
+
+        return {
+            "path": "refuse",
+            "reason": "insufficient_evidence",
+            "answer": None,
+            "sources": [],
+            "attempts": attempt + 1
+        }

@@ -113,3 +113,33 @@ def return_top_sentences(reranked: list[dict], query: str, top_n: int = 5) -> li
 
     return unique
 
+def select_evidence(ranked, query, top_n=5,score_threshold=0.25):
+    reranked = return_crossencoded(ranked, query)
+
+    # Step 2 — split chunks into sentences
+    sentences = return_top_sentences(reranked, query)
+    sentences = [s for s in sentences if s["score"] >= score_threshold]
+
+    # Step 4 — dedupe + context budget
+    seen = set()
+    unique = []
+    total_chars = 0
+    max_chars = 3000
+
+    for row in sentences:
+        norm = normalize_text(row["text"])
+
+        if norm in seen:
+            continue
+
+        if total_chars + len(row["text"]) > max_chars:
+            continue
+
+        seen.add(norm)
+        unique.append(row)
+        total_chars += len(row["text"])
+
+        if len(unique) >= top_n:
+            break
+
+    return unique

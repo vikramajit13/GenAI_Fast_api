@@ -8,7 +8,7 @@ client  = Client(host=settings.OLLAMA_HOST)
 # Make this into a generci llm prompter so that this is not tightly coupled with ollama in future
 
 
-def query_with_context(
+async def query_with_context(
     user_query: str,
     chunks: list[dict],
     trace: bool = True,
