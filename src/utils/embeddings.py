@@ -1,8 +1,8 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from .utils import split_sentences, cosine_similarity, normalize_text
+from .utils import split_sentences, cosine_similarity, normalize_text, clean_query
 from ..core.config import settings
-
+from .invoke_ollama import get_lexical_query
 embedding_model = settings.EMBEDDING_MODEL or "all-MiniLM-L6-v2"
 encoder_model = settings.ENCODER_MODEL or "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _model = SentenceTransformer(embedding_model)
@@ -113,7 +113,7 @@ def return_top_sentences(reranked: list[dict], query: str, top_n: int = 5) -> li
 
     return unique
 
-def select_evidence(ranked, query, top_n=5,score_threshold=0.25):
+def select_evidence(ranked, query,top_n=5,score_threshold=0.30):
     reranked = return_crossencoded(ranked, query)
 
     # Step 2 — split chunks into sentences
@@ -143,3 +143,11 @@ def select_evidence(ranked, query, top_n=5,score_threshold=0.25):
             break
 
     return unique
+
+def rewrite_query(query: str, temperature: float=0.7):
+     q_clean = clean_query(query)
+     q_clean_lex = get_lexical_query(q_clean, temperature) or q_clean
+     return q_clean_lex
+    
+    
+    

@@ -2,21 +2,19 @@ from ..core.store import RAGStore
 import numpy as np
 from ..utils.utils import (
     chunk_text,
-    tokenize,
     clean_query,
     to_pgvector_str,
     to_vec_literal,
+    normalize_text
 )
 from ..utils.embeddings import (
     return_embeddings,
     return_crossencoded,
-    return_topk_sentences,
     return_top_sentences,
-    select_evidence
+    select_evidence,
+    rewrite_query
 )
-from ..utils.retrieval_tfidf import (
-    build_idf,
-)
+
 from ..utils.invoke_ollama import query_with_context, get_lexical_query
 from ..core.db import get_pool
 from asyncpg.exceptions import PostgresError
@@ -215,10 +213,11 @@ class RagService:
             print("some error occured", e)
             raise
         
-    async def orchestrate_answer(self,doc_id: str, query: str, max_retries: int = 1):
+    async def orchestrate_answer(self,doc_id: str, query: str, max_retries: int = 2):
 
         attempt = 0
         current_query = query
+        seen_queries = {normalize_text(query)} 
 
         while attempt <= max_retries:
 
@@ -228,11 +227,13 @@ class RagService:
                 return {
                     "path": "refuse",
                     "reason": "no_retrieval_results",
-                    "answer": None,
-                    "sources": []
+                    "answer": "no Randed",
+                    "sources": [],
+                    "retrieval" :None,
+                    "store": doc_id
                 }
 
-            sentences = select_evidence(ranked)
+            sentences = select_evidence(ranked, current_query)
 
             if sentences:
                 answer = await query_with_context(query, sentences)
@@ -240,21 +241,31 @@ class RagService:
                 return {
                     "path": "direct_answer" if attempt == 0 else "retry_retrieval",
                     "answer": answer,
-                    "sources": sentences,
-                    "attempts": attempt + 1
+                    "retrieval": sentences,
+                    "attempts": attempt + 1,
+                     "store": doc_id
                 }
 
             if attempt == max_retries:
                 break
 
             # rewrite query for retry
-            current_query = rewrite_query(query)
+         
+            rewritten = rewrite_query(query)
+            if not rewritten:
+                break
+            if normalize_text(rewritten) in seen_queries:
+                break
+            current_query = rewritten
+            seen_queries.add(normalize_text(rewritten))
             attempt += 1
 
         return {
             "path": "refuse",
             "reason": "insufficient_evidence",
-            "answer": None,
+            "answer": "failed last return",
             "sources": [],
-            "attempts": attempt + 1
+            "attempts": attempt + 1,
+            "retrieval" :None,
+            "store": doc_id
         }

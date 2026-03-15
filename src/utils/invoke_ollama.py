@@ -80,7 +80,7 @@ I don't know based on the provided context.
     except Exception:
         return response.message.content
     
-def get_lexical_query(user_query):
+def get_lexical_query(user_query, temperature:float =0.0):
 
     prompt = f"""
 You convert a user query into a short keyword search query.
@@ -101,7 +101,7 @@ Keywords:
     response = client.generate(
         model="llama3.1:8b",
         prompt=prompt,
-        options={"temperature":0, "num_predict":20}
+        options={"temperature":temperature, "num_predict":20}
     )
 
     return response["response"].strip()
